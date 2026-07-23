@@ -2894,3 +2894,1052 @@ static void modulo_sincronizacion(void) {
         "\nArchivo generado: resultados/sincronizacion.txt\n"
     );
 }
+
+/* ============================================================================
+   MODULO DE GESTION DE MEMORIA
+   ========================================================================== */
+
+static void memoria_inicializar(
+    Memoria *memoria
+) {
+    memoria->cantidad = 1;
+    memoria->denegadas = 0;
+
+    memoria->bloques[0].inicio = 0;
+    memoria->bloques[0].tamanio = MEMORIA_TOTAL;
+    memoria->bloques[0].libre = 1;
+
+    snprintf(
+        memoria->bloques[0].proceso,
+        sizeof(memoria->bloques[0].proceso),
+        "%s",
+        "-"
+    );
+}
+
+static int memoria_asignar(
+    Memoria *memoria,
+    const char *nombre,
+    int tamanio,
+    Estrategia estrategia
+) {
+    int elegido = -1;
+
+    for (int i = 0; i < memoria->cantidad; i++) {
+        if (
+            memoria->bloques[i].libre
+            &&
+            memoria->bloques[i].tamanio >= tamanio
+        ) {
+            if (estrategia == FIRST_FIT) {
+                elegido = i;
+                break;
+            }
+
+            if (
+                elegido == -1
+                ||
+                memoria->bloques[i].tamanio <
+                memoria->bloques[elegido].tamanio
+            ) {
+                elegido = i;
+            }
+        }
+    }
+
+    if (elegido == -1) {
+        memoria->denegadas++;
+        return 0;
+    }
+
+    Particion original =
+        memoria->bloques[elegido];
+
+    if (
+        original.tamanio > tamanio
+        &&
+        memoria->cantidad < MAX_PARTICIONES
+    ) {
+        for (
+            int i = memoria->cantidad;
+            i > elegido + 1;
+            i--
+        ) {
+            memoria->bloques[i] =
+                memoria->bloques[i - 1];
+        }
+
+        memoria->bloques[elegido + 1].inicio =
+            original.inicio + tamanio;
+
+        memoria->bloques[elegido + 1].tamanio =
+            original.tamanio - tamanio;
+
+        memoria->bloques[elegido + 1].libre =
+            1;
+
+        snprintf(
+            memoria->bloques[elegido + 1].proceso,
+            sizeof(memoria->bloques[elegido + 1].proceso),
+            "%s",
+            "-"
+        );
+
+        memoria->cantidad++;
+    }
+
+    memoria->bloques[elegido].inicio =
+        original.inicio;
+
+    memoria->bloques[elegido].tamanio =
+        tamanio;
+
+    memoria->bloques[elegido].libre =
+        0;
+
+    snprintf(
+        memoria->bloques[elegido].proceso,
+        sizeof(memoria->bloques[elegido].proceso),
+        "%s",
+        nombre
+    );
+
+    return 1;
+}
+
+static void memoria_fusionar(
+    Memoria *memoria
+) {
+    int i = 0;
+
+    while (
+        i <
+        memoria->cantidad - 1
+    ) {
+        if (
+            memoria->bloques[i].libre
+            &&
+            memoria->bloques[i + 1].libre
+        ) {
+            memoria->bloques[i].tamanio +=
+                memoria->bloques[i + 1].tamanio;
+
+            for (
+                int j = i + 1;
+                j < memoria->cantidad - 1;
+                j++
+            ) {
+                memoria->bloques[j] =
+                    memoria->bloques[j + 1];
+            }
+
+            memoria->cantidad--;
+        } else {
+            i++;
+        }
+    }
+}
+
+static int memoria_liberar(
+    Memoria *memoria,
+    const char *nombre
+) {
+    for (int i = 0; i < memoria->cantidad; i++) {
+        if (
+            !memoria->bloques[i].libre
+            &&
+            strcmp(
+                memoria->bloques[i].proceso,
+                nombre
+            ) == 0
+        ) {
+            memoria->bloques[i].libre =
+                1;
+
+            snprintf(
+                memoria->bloques[i].proceso,
+                sizeof(memoria->bloques[i].proceso),
+                "%s",
+                "-"
+            );
+
+            memoria_fusionar(
+                memoria
+            );
+
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static void memoria_mostrar(
+    const Memoria *memoria,
+    FILE *salida
+) {
+    fprintf(
+        salida,
+        "\n============================================================\n"
+    );
+
+    fprintf(
+        salida,
+        " MAPA DE PARTICIONES\n"
+    );
+
+    fprintf(
+        salida,
+        "============================================================\n"
+    );
+
+    fprintf(
+        salida,
+        "INICIO   TAMANIO   ESTADO      PROCESO\n"
+    );
+
+    fprintf(
+        salida,
+        "------------------------------------------------------------\n"
+    );
+
+    for (int i = 0; i < memoria->cantidad; i++) {
+        fprintf(
+            salida,
+            "%-8d %-9d %-11s %s\n",
+            memoria->bloques[i].inicio,
+            memoria->bloques[i].tamanio,
+            memoria->bloques[i].libre
+                ? "Libre"
+                : "Ocupado",
+            memoria->bloques[i].proceso
+        );
+    }
+}
+
+static double fragmentacion_externa(
+    const Memoria *memoria
+) {
+    int memoria_libre = 0;
+    int mayor_hueco = 0;
+
+    for (int i = 0; i < memoria->cantidad; i++) {
+        if (memoria->bloques[i].libre) {
+            memoria_libre +=
+                memoria->bloques[i].tamanio;
+
+            if (
+                memoria->bloques[i].tamanio >
+                mayor_hueco
+            ) {
+                mayor_hueco =
+                    memoria->bloques[i].tamanio;
+            }
+        }
+    }
+
+    if (memoria_libre == 0) {
+        return 0.0;
+    }
+
+    return
+        100.0 *
+        (
+            1.0 -
+            (double)mayor_hueco /
+            memoria_libre
+        );
+}
+
+static int contar_huecos_libres(
+    const Memoria *memoria
+) {
+    int huecos = 0;
+
+    for (int i = 0; i < memoria->cantidad; i++) {
+        if (memoria->bloques[i].libre) {
+            huecos++;
+        }
+    }
+
+    return huecos;
+}
+
+static void ejecutar_prueba_memoria(
+    Estrategia estrategia,
+    int mostrar,
+    double *fragmentacion_final,
+    int *huecos_finales,
+    int *denegadas_finales
+) {
+    Memoria memoria;
+
+    memoria_inicializar(
+        &memoria
+    );
+
+    memoria_asignar(
+        &memoria,
+        "Login1",
+        96,
+        estrategia
+    );
+
+    memoria_asignar(
+        &memoria,
+        "Consulta1",
+        64,
+        estrategia
+    );
+
+    memoria_asignar(
+        &memoria,
+        "Transferencia1",
+        256,
+        estrategia
+    );
+
+    memoria_asignar(
+        &memoria,
+        "Pago1",
+        192,
+        estrategia
+    );
+
+    memoria_asignar(
+        &memoria,
+        "ActualizaBD",
+        128,
+        estrategia
+    );
+
+    memoria_liberar(
+        &memoria,
+        "Consulta1"
+    );
+
+    memoria_asignar(
+        &memoria,
+        "Consulta2",
+        64,
+        estrategia
+    );
+
+    memoria_asignar(
+        &memoria,
+        "Transferencia2",
+        256,
+        estrategia
+    );
+
+    memoria_liberar(
+        &memoria,
+        "Pago1"
+    );
+
+    memoria_asignar(
+        &memoria,
+        "Liquidacion",
+        512,
+        estrategia
+    );
+
+    if (mostrar) {
+        printf(
+            "\nEstado intermedio despues de 10 operaciones:\n"
+        );
+
+        memoria_mostrar(
+            &memoria,
+            stdout
+        );
+    }
+
+    memoria_asignar(
+        &memoria,
+        "Pago2",
+        192,
+        estrategia
+    );
+
+    memoria_liberar(
+        &memoria,
+        "Login1"
+    );
+
+    memoria_asignar(
+        &memoria,
+        "Login2",
+        96,
+        estrategia
+    );
+
+    memoria_liberar(
+        &memoria,
+        "ActualizaBD"
+    );
+
+    memoria_asignar(
+        &memoria,
+        "Consulta3",
+        64,
+        estrategia
+    );
+
+    *fragmentacion_final =
+        fragmentacion_externa(
+            &memoria
+        );
+
+    *huecos_finales =
+        contar_huecos_libres(
+            &memoria
+        );
+
+    *denegadas_finales =
+        memoria.denegadas;
+
+    if (mostrar) {
+        printf(
+            "\nEstado final despues de 15 operaciones:\n"
+        );
+
+        memoria_mostrar(
+            &memoria,
+            stdout
+        );
+
+        printf(
+            "Fragmentacion externa: %.2f%%\n",
+            *fragmentacion_final
+        );
+
+        printf(
+            "Huecos libres: %d\n",
+            *huecos_finales
+        );
+
+        printf(
+            "Asignaciones denegadas: %d\n",
+            *denegadas_finales
+        );
+    }
+}
+
+static void modulo_memoria(void) {
+    double fragmentacion_first = 0.0;
+    double fragmentacion_best = 0.0;
+
+    int huecos_first = 0;
+    int huecos_best = 0;
+
+    int denegadas_first = 0;
+    int denegadas_best = 0;
+
+    printf("\n");
+    printf("============================================================\n");
+    printf(" MODULO 4: GESTION DE MEMORIA\n");
+    printf("============================================================\n");
+
+    printf("\n--- FIRST-FIT ---\n");
+
+    ejecutar_prueba_memoria(
+        FIRST_FIT,
+        1,
+        &fragmentacion_first,
+        &huecos_first,
+        &denegadas_first
+    );
+
+    printf("\n--- BEST-FIT ---\n");
+
+    ejecutar_prueba_memoria(
+        BEST_FIT,
+        1,
+        &fragmentacion_best,
+        &huecos_best,
+        &denegadas_best
+    );
+
+    printf("\n");
+    printf("==============================================================\n");
+    printf("ESTRATEGIA   FRAGMENTACION   HUECOS LIBRES   DENEGADAS\n");
+    printf("==============================================================\n");
+
+    printf(
+        "First-Fit    %-15.2f %-15d %d\n",
+        fragmentacion_first,
+        huecos_first,
+        denegadas_first
+    );
+
+    printf(
+        "Best-Fit     %-15.2f %-15d %d\n",
+        fragmentacion_best,
+        huecos_best,
+        denegadas_best
+    );
+
+    printf("==============================================================\n");
+
+    if (
+        fragmentacion_first <
+        fragmentacion_best
+    ) {
+        printf(
+            "\nPara esta carga, First-Fit produjo menor fragmentacion externa.\n"
+        );
+    } else if (
+        fragmentacion_best <
+        fragmentacion_first
+    ) {
+        printf(
+            "\nPara esta carga, Best-Fit produjo menor fragmentacion externa.\n"
+        );
+    } else {
+        printf(
+            "\nPara esta carga, ambas estrategias produjeron la misma fragmentacion.\n"
+        );
+    }
+
+    FILE *archivo =
+        fopen(
+            "resultados/memoria.csv",
+            "w"
+        );
+
+    if (archivo == NULL) {
+        perror(
+            "No se pudo crear resultados/memoria.csv"
+        );
+    } else {
+        fprintf(
+            archivo,
+            "Estrategia,Fragmentacion_externa,Huecos_libres,Asignaciones_denegadas\n"
+        );
+
+        fprintf(
+            archivo,
+            "First-Fit,%.2f,%d,%d\n",
+            fragmentacion_first,
+            huecos_first,
+            denegadas_first
+        );
+
+        fprintf(
+            archivo,
+            "Best-Fit,%.2f,%d,%d\n",
+            fragmentacion_best,
+            huecos_best,
+            denegadas_best
+        );
+
+        fclose(archivo);
+    }
+
+    printf(
+        "\nArchivo generado: resultados/memoria.csv\n"
+    );
+}
+
+/* ============================================================================
+   MODULO INTEGRADO
+   ========================================================================== */
+
+static void modulo_integrado(
+    const Proceso base[]
+) {
+    Memoria memoria;
+
+    int aceptados = 0;
+    int rechazados = 0;
+
+    int memoria_actual = 0;
+    int memoria_maxima = 0;
+
+    pthread_t hilos[NUM_HILOS];
+
+    printf("\n");
+    printf("============================================================\n");
+    printf(" MODULO 5: SISTEMA INTEGRADO\n");
+    printf("============================================================\n");
+
+    memoria_inicializar(
+        &memoria
+    );
+
+    printf(
+        "\n1. Asignacion de memoria mediante Best-Fit:\n"
+    );
+
+    for (int i = 0; i < TOTAL_PROCESOS; i++) {
+        if (
+            memoria_asignar(
+                &memoria,
+                base[i].nombre,
+                base[i].memoria,
+                BEST_FIT
+            )
+        ) {
+            aceptados++;
+
+            memoria_actual +=
+                base[i].memoria;
+
+            if (
+                memoria_actual >
+                memoria_maxima
+            ) {
+                memoria_maxima =
+                    memoria_actual;
+            }
+
+            printf(
+                "[OK] %-20s %d MB\n",
+                base[i].nombre,
+                base[i].memoria
+            );
+        } else {
+            rechazados++;
+
+            printf(
+                "[DENEGADO] %-20s %d MB\n",
+                base[i].nombre,
+                base[i].memoria
+            );
+        }
+    }
+
+    printf(
+        "\n2. Planificacion de procesos con Round Robin:\n"
+    );
+
+    Metricas round_robin =
+        ejecutar_round_robin(
+            base,
+            0
+        );
+
+    Metricas fcfs =
+        ejecutar_fcfs(
+            base,
+            0
+        );
+
+    printf(
+        "Round Robin finalizado con quantum = %d.\n",
+        QUANTUM
+    );
+
+    printf(
+        "\n3. Acceso sincronizado al saldo mediante mutex:\n"
+    );
+
+    saldo_global =
+        100000;
+
+    for (int i = 0; i < NUM_HILOS; i++) {
+        if (
+            pthread_create(
+                &hilos[i],
+                NULL,
+                depositar_con_mutex,
+                NULL
+            ) != 0
+        ) {
+            fprintf(
+                stderr,
+                "Error al crear el hilo integrado %d.\n",
+                i + 1
+            );
+
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    for (int i = 0; i < NUM_HILOS; i++) {
+        pthread_join(
+            hilos[i],
+            NULL
+        );
+    }
+
+    long saldo_esperado =
+        100000L +
+        (long)NUM_HILOS *
+        OPERACIONES_HILO;
+
+    long conflictos =
+        saldo_esperado -
+        saldo_global;
+
+    double mejora_respuesta =
+        fcfs.respuesta_promedio > 0.0
+            ? 100.0 *
+              (
+                  fcfs.respuesta_promedio -
+                  round_robin.respuesta_promedio
+              )
+              /
+              fcfs.respuesta_promedio
+            : 0.0;
+
+    printf("\n");
+    printf("============================================================\n");
+    printf(" METRICAS DEL SISTEMA INTEGRADO\n");
+    printf("============================================================\n");
+
+    printf(
+        "Procesos recibidos:                  %d\n",
+        TOTAL_PROCESOS
+    );
+
+    printf(
+        "Procesos con memoria asignada:       %d\n",
+        aceptados
+    );
+
+    printf(
+        "Procesos rechazados:                 %d\n",
+        rechazados
+    );
+
+    printf(
+        "Throughput total:                    %.3f procesos/u.t.\n",
+        round_robin.throughput
+    );
+
+    printf(
+        "Tiempo de respuesta promedio:        %.2f\n",
+        round_robin.respuesta_promedio
+    );
+
+    printf(
+        "Uso de CPU:                          %.2f%%\n",
+        round_robin.uso_cpu
+    );
+
+    printf(
+        "Uso maximo de memoria:               %d MB de %d MB\n",
+        memoria_maxima,
+        MEMORIA_TOTAL
+    );
+
+    printf(
+        "Fragmentacion externa final:         %.2f%%\n",
+        fragmentacion_externa(
+            &memoria
+        )
+    );
+
+    printf(
+        "Conflictos con mutex:                %ld\n",
+        conflictos
+    );
+
+    printf(
+        "Deadlocks ocurridos:                 0\n"
+    );
+
+    printf(
+        "Mejora de RT RR frente a FCFS:       %.2f%%\n",
+        mejora_respuesta
+    );
+
+    printf("\nCuellos de botella identificados:\n");
+
+    printf(
+        "1. La liquidacion nocturna incrementa la espera en FCFS.\n"
+    );
+
+    printf(
+        "2. Un mutex global limita el paralelismo entre operaciones independientes.\n"
+    );
+
+    printf(
+        "3. La memoria total puede impedir que todos los procesos residan simultaneamente.\n"
+    );
+
+    printf("\nPlan de optimizacion:\n");
+
+    printf(
+        "- Usar Round Robin para operaciones bancarias interactivas.\n"
+    );
+
+    printf(
+        "- Ejecutar Liquidacion en una cola batch de baja prioridad.\n"
+    );
+
+    printf(
+        "- Usar un mutex por cuenta para permitir mayor paralelismo.\n"
+    );
+
+    printf(
+        "- Liberar memoria cuando cada proceso termina su ejecucion.\n"
+    );
+
+    printf(
+        "- Beneficio medido en RT: %.2f%% frente a FCFS.\n",
+        mejora_respuesta
+    );
+
+    FILE *archivo =
+        fopen(
+            "resultados/integracion.txt",
+            "w"
+        );
+
+    if (archivo == NULL) {
+        perror(
+            "No se pudo crear resultados/integracion.txt"
+        );
+    } else {
+        fprintf(
+            archivo,
+            "MODULO 5 - SISTEMA INTEGRADO\n"
+        );
+
+        fprintf(
+            archivo,
+            "Procesos recibidos: %d\n",
+            TOTAL_PROCESOS
+        );
+
+        fprintf(
+            archivo,
+            "Procesos aceptados: %d\n",
+            aceptados
+        );
+
+        fprintf(
+            archivo,
+            "Procesos rechazados: %d\n",
+            rechazados
+        );
+
+        fprintf(
+            archivo,
+            "Throughput: %.6f\n",
+            round_robin.throughput
+        );
+
+        fprintf(
+            archivo,
+            "RT promedio: %.2f\n",
+            round_robin.respuesta_promedio
+        );
+
+        fprintf(
+            archivo,
+            "Uso CPU: %.2f\n",
+            round_robin.uso_cpu
+        );
+
+        fprintf(
+            archivo,
+            "Uso maximo memoria: %d MB\n",
+            memoria_maxima
+        );
+
+        fprintf(
+            archivo,
+            "Fragmentacion externa: %.2f\n",
+            fragmentacion_externa(
+                &memoria
+            )
+        );
+
+        fprintf(
+            archivo,
+            "Conflictos con mutex: %ld\n",
+            conflictos
+        );
+
+        fprintf(
+            archivo,
+            "Deadlocks: 0\n"
+        );
+
+        fprintf(
+            archivo,
+            "Mejora RT RR vs FCFS: %.2f%%\n",
+            mejora_respuesta
+        );
+
+        fclose(archivo);
+    }
+
+    printf(
+        "\nArchivo generado: resultados/integracion.txt\n"
+    );
+}
+
+/* ============================================================================
+   DEMOSTRACION COMPLETA
+   ========================================================================== */
+
+static void demostracion_completa(
+    const Proceso base[]
+) {
+    printf("\n");
+    printf("============================================================\n");
+    printf(" DEMOSTRACION COMPLETA DEL PROYECTO SIMGESRC\n");
+    printf("============================================================\n");
+
+    mostrar_carga(
+        base
+    );
+
+    modulo_planificacion(
+        base
+    );
+
+    modulo_sincronizacion();
+
+    modulo_memoria();
+
+    modulo_integrado(
+        base
+    );
+
+    printf("\n");
+    printf("============================================================\n");
+    printf(" DEMOSTRACION COMPLETA FINALIZADA\n");
+    printf("============================================================\n");
+}
+
+/* ============================================================================
+   MENU PRINCIPAL
+   ========================================================================== */
+
+static void menu_principal(void) {
+    Proceso procesos[TOTAL_PROCESOS];
+
+    int opcion;
+
+    cargar_procesos(
+        procesos
+    );
+
+    inicializar_cuentas();
+
+    crear_directorio_resultados();
+
+    do {
+        encabezado();
+
+        printf(
+            "1. Operaciones bancarias\n"
+        );
+
+        printf(
+            "2. Mostrar carga de procesos\n"
+        );
+
+        printf(
+            "3. Ejecutar planificacion de CPU\n"
+        );
+
+        printf(
+            "4. Ejecutar sincronizacion y concurrencia\n"
+        );
+
+        printf(
+            "5. Ejecutar gestion de memoria\n"
+        );
+
+        printf(
+            "6. Ejecutar sistema integrado\n"
+        );
+
+        printf(
+            "7. Ejecutar demostracion completa\n"
+        );
+
+        printf(
+            "0. Salir\n"
+        );
+
+        opcion = leer_entero(
+            "\nSeleccione una opcion: ",
+            0,
+            7
+        );
+
+        switch (opcion) {
+            case 1:
+                modulo_bancario();
+                break;
+
+            case 2:
+                mostrar_carga(
+                    procesos
+                );
+
+                pausa();
+                break;
+
+            case 3:
+                modulo_planificacion(
+                    procesos
+                );
+
+                pausa();
+                break;
+
+            case 4:
+                modulo_sincronizacion();
+
+                pausa();
+                break;
+
+            case 5:
+                modulo_memoria();
+
+                pausa();
+                break;
+
+            case 6:
+                modulo_integrado(
+                    procesos
+                );
+
+                pausa();
+                break;
+
+            case 7:
+                demostracion_completa(
+                    procesos
+                );
+
+                pausa();
+                break;
+
+            case 0:
+                printf(
+                    "\nPrograma finalizado correctamente.\n"
+                );
+                break;
+
+            default:
+                printf(
+                    "\nOpcion no valida.\n"
+                );
+
+                pausa();
+                break;
+        }
+    } while (opcion != 0);
+
+    destruir_cuentas();
+}
+
+/* ============================================================================
+   FUNCION PRINCIPAL
+   ========================================================================== */
+
+int main(void) {
+    menu_principal();
+
+    return EXIT_SUCCESS;
+}
