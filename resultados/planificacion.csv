@@ -1,0 +1,5 @@
+Algoritmo,WT_promedio,TAT_promedio,RT_promedio,Throughput,Uso_CPU,Makespan
+FCFS,12.90,18.20,12.90,0.188679,100.00,53
+SJF,10.70,16.00,10.70,0.188679,100.00,53
+Round Robin,16.90,22.20,8.50,0.188679,100.00,53
+Prioridad + Aging,13.60,18.90,13.60,0.188679,100.00,53

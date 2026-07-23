@@ -1,0 +1,12 @@
+MODULO 5 - SISTEMA INTEGRADO
+Procesos recibidos: 10
+Procesos aceptados: 10
+Procesos rechazados: 0
+Throughput: 0.188679
+RT promedio: 8.50
+Uso CPU: 100.00
+Uso maximo memoria: 1824 MB
+Fragmentacion externa: 0.00
+Conflictos: 0
+Deadlocks: 0
+Mejora RT RR vs FCFS: 34.11%

@@ -1,0 +1,12 @@
+MODULO 3 - SINCRONIZACION
+Hilos: 8
+Operaciones por hilo: 2000
+Saldo esperado: 116000
+Saldo sin mutex: 102041
+Perdidas sin mutex: 13959
+Saldo con mutex: 116000
+Perdidas con mutex: 0
+Entradas de log: 800
+Tiempo sin mutex: 0.001567
+Tiempo con mutex: 0.001266
+Overhead: -0.000301
